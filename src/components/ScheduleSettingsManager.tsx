@@ -731,37 +731,6 @@ export default function ScheduleSettingsManager({
               </select>
             </CardContent>
           </Card>
-
-          {/* Card: Preferência Primeira Sexta */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-indigo-500" />
-                <CardTitle className="text-base">
-                  Preferência: 1ª Sexta-Feira
-                </CardTitle>
-              </div>
-              <CardDescription className="text-xs">
-                Acólito com prioridade para a missa da Primeira Sexta do mês às 15h no Salão Paroquial.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <select
-                value={draft.firstFridayPreferenceName}
-                onChange={(e) =>
-                  update("firstFridayPreferenceName", e.target.value)
-                }
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">Nenhuma preferência definida</option>
-                {activeAcolytes.map((a) => (
-                  <option key={a.id} value={a.name}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </CardContent>
-          </Card>
         </div>
       )}
 

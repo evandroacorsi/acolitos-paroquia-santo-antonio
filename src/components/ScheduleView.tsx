@@ -166,12 +166,19 @@ export default function ScheduleView({
 
   // 1. Coletar todas as entradas
   // Usamos any aqui para evitar erro de tipagem caso ScheduleEntry não esteja exportado
+  // A missa da 1ª sexta (Salão Paroquial 15h) não existe mais; escalas antigas
+  // salvas ainda podem trazê-la, então ela é ignorada na tela e na exportação.
+  const isRemovedFridayMass = (e: { dayOfWeek: number; location: string; time: string }) =>
+    e.dayOfWeek === 5 && e.location === "Salão Paroquial" && e.time === "15h";
+
   const allEntries: any[] = data.sections.flatMap((s, sIdx) =>
-    s.entries.map((e, eIdx) => ({
-      ...e,
-      sectionIdx: sIdx,
-      entryIdx: eIdx,
-    })),
+    s.entries
+      .map((e, eIdx) => ({
+        ...e,
+        sectionIdx: sIdx,
+        entryIdx: eIdx,
+      }))
+      .filter((e) => !isRemovedFridayMass(e)),
   );
 
   const acolyteCount = new Map<string, number>();

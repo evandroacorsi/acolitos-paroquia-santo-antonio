@@ -5,12 +5,12 @@ import {
   ScheduleData,
   VariableRule,
   RuleViolation,
+  MassSlot,
   SUNDAY_MASSES,
   SATURDAY_MASSES,
   SATURDAY_BIWEEKLY_MASS,
   SATURDAY_HOSPITAL_MASS,
   WEEKDAY_MASSES,
-  FIRST_FRIDAY_MASS,
   DEFAULT_SCHEDULE_SETTINGS,
   ScheduleSettings,
 } from "@/types/schedule";
@@ -136,8 +136,6 @@ function canServe(
       return false;
   }
 
-  // Allana: always on Friday (handled by preference, not restriction here)
-
   // Variable rules: unavailable dates
   const acolyteVarRules = variableRules.filter(
     (r) => r.acolyte_id === acolyte.id,
@@ -191,7 +189,7 @@ export function generateSchedule(
   // Get max assignments from variable rules
   const maxAssignments: Record<string, number> = {};
   variableRules.forEach((r) => {
-    if (r.rule_type === "max_assignments" && r.rule_data.max) {
+    if (r.rule_type === "max_assignments" && typeof r.rule_data.max === "number") {
       maxAssignments[r.acolyte_id] = r.rule_data.max;
     }
   });
@@ -218,6 +216,13 @@ export function generateSchedule(
     const dates = assignedDates[acolyteId];
     if (!dates) return false;
     return dates.has(dateStr);
+  }
+
+  function blocksConsecutiveDay(acolyteId: string, dateStr: string): boolean {
+    return (
+      settings.avoidConsecutiveDays !== false &&
+      hasConsecutiveDay(acolyteId, dateStr)
+    );
   }
 
   function assignAcolyte(
@@ -267,6 +272,7 @@ export function generateSchedule(
       if (!canServe(a, entry, variableRules, isVacation, settings))
         return false;
       if (hasSameDay(a.id, entry.date)) return false; // Evita mais de uma missa no mesmo dia
+      if (blocksConsecutiveDay(a.id, entry.date)) return false; // Nunca escala em dias seguidos
       // Check max assignments
       if (
         maxAssignments[a.id] !== undefined &&
@@ -276,19 +282,8 @@ export function generateSchedule(
       return true;
     });
 
-    // 3. Ordena os elegíveis para balancear a escala e evitar dias consecutivos
+    // 3. Ordena os elegíveis para balancear a escala
     const sorted = shuffle(eligible).sort((a, b) => {
-      const consecA =
-        settings.avoidConsecutiveDays !== false &&
-        hasConsecutiveDay(a.id, entry.date)
-          ? 100
-          : 0;
-      const consecB =
-        settings.avoidConsecutiveDays !== false &&
-        hasConsecutiveDay(b.id, entry.date)
-          ? 100
-          : 0;
-
       const penaltyA = settings.lowCommitmentNames.includes(a.name)
         ? settings.lowCommitmentPenalty
         : 0;
@@ -296,8 +291,8 @@ export function generateSchedule(
         ? settings.lowCommitmentPenalty
         : 0;
 
-      const scoreA = (assignmentCount[a.id] || 0) + penaltyA + consecA;
-      const scoreB = (assignmentCount[b.id] || 0) + penaltyB + consecB;
+      const scoreA = (assignmentCount[a.id] || 0) + penaltyA;
+      const scoreB = (assignmentCount[b.id] || 0) + penaltyB;
 
       return scoreA - scoreB;
     });
@@ -359,6 +354,7 @@ export function generateSchedule(
           !picked.some((p) => p.id === partner.id) &&
           canServe(partner, entry, variableRules, isVacation, settings) &&
           !hasSameDay(partner.id, entry.date) &&
+          !blocksConsecutiveDay(partner.id, entry.date) &&
           (maxAssignments[partner.id] === undefined ||
             (assignmentCount[partner.id] || 0) < maxAssignments[partner.id])
         ) {
@@ -381,7 +377,7 @@ export function generateSchedule(
   const saturdayEntries: ScheduleEntry[] = [];
   const weekdayEntries: ScheduleEntry[] = [];
 
-  // Ordena os dias do mês cronologicamente para coordenar sextas, sábados e domingos
+  // Ordena os dias do mês cronologicamente para coordenar sábados e domingos
   const sortedDays = [...days].sort((a, b) => a.getTime() - b.getTime());
 
   for (const day of sortedDays) {
@@ -410,33 +406,9 @@ export function generateSchedule(
       });
     }
 
-    // 2. Primeira Sexta-Feira
-    if (dow === 5) {
-      const firstFriday = days.find((d) => d.getDay() === 5);
-      if (firstFriday && formatDate(firstFriday) === dateStr) {
-        const ids = pickAcolytes(
-          {
-            date: dateStr,
-            dayOfWeek: 5,
-            location: FIRST_FRIDAY_MASS.location,
-            time: FIRST_FRIDAY_MASS.time,
-          },
-          FIRST_FRIDAY_MASS.requiredAcolytes,
-          settings.firstFridayPreferenceName,
-        );
-        weekdayEntries.push({
-          date: dateStr,
-          dayOfWeek: 5,
-          location: FIRST_FRIDAY_MASS.location,
-          time: FIRST_FRIDAY_MASS.time,
-          acolytes: ids,
-        });
-      }
-    }
-
-    // 3. Sábados
+    // 2. Sábados
     if (dow === 6) {
-      // 3.1 Agissê / São Sebastião (2º e 4º sábados)
+      // 2.1 Agissê / São Sebastião (2º e 4º sábados)
       if (weekNum === 2 || weekNum === 4) {
         const ids = pickAcolytes(
           {
@@ -457,7 +429,7 @@ export function generateSchedule(
         });
       }
 
-      // 3.2 Hospital (2º sábado)
+      // 2.2 Hospital (2º sábado)
       if (weekNum === 2) {
         const ids = pickAcolytes(
           {
@@ -477,7 +449,7 @@ export function generateSchedule(
         });
       }
 
-      // 3.3 Missas Regulares de Sábado
+      // 2.3 Missas Regulares de Sábado
       for (const mass of SATURDAY_MASSES) {
         const ids = pickAcolytes(
           {
@@ -498,7 +470,7 @@ export function generateSchedule(
       }
     }
 
-    // 4. Domingos
+    // 3. Domingos
     if (dow === 0) {
       for (const mass of SUNDAY_MASSES) {
         const preference = mass.location.includes("Santa Ter")
@@ -534,6 +506,22 @@ export function generateSchedule(
 
 // ========== VALIDATION ==========
 
+function getRequiredAcolytes(entry: ScheduleEntry): number | undefined {
+  const matches = (slot: MassSlot) =>
+    slot.location === entry.location && slot.time === entry.time;
+
+  const candidates: MassSlot[] =
+    entry.dayOfWeek === 0
+      ? SUNDAY_MASSES
+      : entry.dayOfWeek === 6
+        ? [...SATURDAY_MASSES, SATURDAY_BIWEEKLY_MASS, SATURDAY_HOSPITAL_MASS]
+        : WEEKDAY_MASSES.filter((m) => m.dayOfWeek === entry.dayOfWeek).map(
+            (m) => m.slot,
+          );
+
+  return candidates.find(matches)?.requiredAcolytes;
+}
+
 export function validateSchedule(
   data: ScheduleData,
   acolytes: Acolyte[],
@@ -558,7 +546,7 @@ export function validateSchedule(
   // Max assignments from variable rules
   const maxAssignments: Record<string, number> = {};
   variableRules.forEach((r) => {
-    if (r.rule_type === "max_assignments" && r.rule_data.max) {
+    if (r.rule_type === "max_assignments" && typeof r.rule_data.max === "number") {
       maxAssignments[r.acolyte_id] = r.rule_data.max;
     }
   });
@@ -643,6 +631,17 @@ export function validateSchedule(
         }
       }
 
+      // Check missing acolytes
+      const required = getRequiredAcolytes(entry);
+      if (required !== undefined && entry.acolytes.length < required) {
+        const missing = required - entry.acolytes.length;
+        violations.push({
+          type: "warning",
+          message: `Faltando ${missing} acólito(s) em ${entry.location} ${entry.time} (${formatDateBR(new Date(entry.date + "T12:00:00"))})`,
+          entry,
+        });
+      }
+
       // Check weak acolytes together
       if (entry.acolytes.length >= 2) {
         const allWeak = entry.acolytes.every((id) => {
@@ -695,7 +694,7 @@ export function validateSchedule(
             );
 
           violations.push({
-            type: "warning",
+            type: "error",
             message: `${acolyte.name} está escalado(a) em dias seguidos (${formatDateBR(d1)} e ${formatDateBR(d2)})`,
             entry: entryD2,
           });

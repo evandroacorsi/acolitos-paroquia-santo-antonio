@@ -69,7 +69,6 @@ export interface ScheduleSettings {
   targetChapelAcolyteName: string;
   targetChapelLocationIncludes: string[];
   santaTerezaPreferenceName: string;
-  firstFridayPreferenceName: string;
   avoidConsecutiveDays?: boolean;
 }
 
@@ -117,7 +116,6 @@ export const DEFAULT_SCHEDULE_SETTINGS: ScheduleSettings = {
   targetChapelAcolyteName: "Maria Anália",
   targetChapelLocationIncludes: ["Agissê", "Sebastião"],
   santaTerezaPreferenceName: "Giovana",
-  firstFridayPreferenceName: "Allana",
   avoidConsecutiveDays: true,
 };
 
@@ -163,12 +161,6 @@ export const WEEKDAY_MASSES: {
     slot: { location: "Salão Paroquial", time: "19h", requiredAcolytes: 1 },
   },
 ];
-
-export const FIRST_FRIDAY_MASS: MassSlot = {
-  location: "Salão Paroquial",
-  time: "15h",
-  requiredAcolytes: 1,
-};
 
 export const MONTH_NAMES = [
   "Janeiro",

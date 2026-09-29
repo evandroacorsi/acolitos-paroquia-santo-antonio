@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "Homepage": "https://acolitos.paroquiasarancharia.evandroacorsi.dev/",
+  "Homepage": "https://evandroacorsi.github.io/acolitos-paroquia-santo-antonio/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
