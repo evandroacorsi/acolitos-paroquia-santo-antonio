@@ -163,16 +163,15 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-export function generateSchedule(
-  year: number,
-  month: number,
+// Estado da distribuição de acólitos (contagem, datas e capelas por acólito)
+// e a escolha de quem serve em cada missa. Compartilhado entre a geração
+// completa e o preenchimento de missas extras numa escala já existente.
+function createAssigner(
   acolytes: Acolyte[],
   variableRules: VariableRule[],
-  isVacation: boolean = false,
-  rawSettings?: Partial<ScheduleSettings>,
-): ScheduleData {
-  const settings = mergeSettings(rawSettings);
-  const days = getDaysInMonth(year, month);
+  isVacation: boolean,
+  settings: ScheduleSettings,
+) {
   const activeAcolytes = acolytes.filter((a) => a.active);
 
   // Track assignments count per acolyte
@@ -195,8 +194,6 @@ export function generateSchedule(
       maxAssignments[r.acolyte_id] = r.rule_data.max;
     }
   });
-
-  const sections: ScheduleSection[] = [];
 
   function getAdjacentDates(dateStr: string): [string, string] {
     const d = new Date(dateStr + "T12:00:00");
@@ -375,6 +372,36 @@ export function generateSchedule(
     return picked.map((a) => a.id);
   }
 
+  // Registra uma entrada já existente para que as próximas escolhas a considerem
+  function registerEntry(entry: ScheduleEntry) {
+    for (const id of entry.acolytes) {
+      const a = activeAcolytes.find((x) => x.id === id);
+      if (a) assignAcolyte(a, entry);
+    }
+  }
+
+  return { pickAcolytes, registerEntry };
+}
+
+export function generateSchedule(
+  year: number,
+  month: number,
+  acolytes: Acolyte[],
+  variableRules: VariableRule[],
+  isVacation: boolean = false,
+  rawSettings?: Partial<ScheduleSettings>,
+): ScheduleData {
+  const settings = mergeSettings(rawSettings);
+  const days = getDaysInMonth(year, month);
+  const { pickAcolytes } = createAssigner(
+    acolytes,
+    variableRules,
+    isVacation,
+    settings,
+  );
+
+  const sections: ScheduleSection[] = [];
+
   const sundayEntries: ScheduleEntry[] = [];
   const saturdayEntries: ScheduleEntry[] = [];
   const weekdayEntries: ScheduleEntry[] = [];
@@ -524,6 +551,81 @@ export function generateSchedule(
   sections.push({ title: "Dias de Semana", entries: weekdayEntries });
 
   return { sections };
+}
+
+// Adiciona à escala existente as missas extras que ainda não estão nela,
+// sem mexer nas entradas já geradas.
+export function addCustomMassesToSchedule(
+  data: ScheduleData,
+  year: number,
+  month: number,
+  acolytes: Acolyte[],
+  variableRules: VariableRule[],
+  isVacation: boolean = false,
+  rawSettings?: Partial<ScheduleSettings>,
+): { data: ScheduleData; added: ScheduleEntry[] } {
+  const settings = mergeSettings(rawSettings);
+  const { pickAcolytes, registerEntry } = createAssigner(
+    acolytes,
+    variableRules,
+    isVacation,
+    settings,
+  );
+
+  const existing = data.sections.flatMap((s) => s.entries);
+  [...existing]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .forEach(registerEntry);
+
+  const added: ScheduleEntry[] = [];
+  for (const day of getDaysInMonth(year, month)) {
+    const dow = day.getDay();
+    const dateStr = formatDate(day);
+
+    for (const mass of settings.customMasses.filter(
+      (m) => m.dayOfWeek === dow,
+    )) {
+      const alreadyThere = existing.some(
+        (e) =>
+          e.date === dateStr &&
+          e.location === mass.location &&
+          e.time === mass.time,
+      );
+      if (alreadyThere) continue;
+
+      const entry = {
+        date: dateStr,
+        dayOfWeek: dow,
+        location: mass.location,
+        time: mass.time,
+      };
+      const ids = pickAcolytes(
+        entry,
+        mass.requiredAcolytes,
+        mass.preferenceName || undefined,
+      );
+      added.push({ ...entry, acolytes: ids });
+    }
+  }
+
+  const sectionTitle = (dow: number) =>
+    dow === 0 ? "Domingos" : dow === 6 ? "Sábados" : "Dias de Semana";
+
+  const sections = data.sections.map((s) => ({
+    ...s,
+    entries: [
+      ...s.entries,
+      ...added.filter((e) => sectionTitle(e.dayOfWeek) === s.title),
+    ],
+  }));
+  for (const title of ["Domingos", "Sábados", "Dias de Semana"]) {
+    const orphans = added.filter((e) => sectionTitle(e.dayOfWeek) === title);
+    if (orphans.length > 0 && !sections.some((s) => s.title === title)) {
+      sections.push({ title, entries: orphans });
+    }
+  }
+
+  return { data: { ...data, sections }, added };
 }
 
 // ========== VALIDATION ==========

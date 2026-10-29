@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { generateSchedule, validateSchedule } from "@/lib/schedule-engine";
+import {
+  addCustomMassesToSchedule,
+  generateSchedule,
+  validateSchedule,
+} from "@/lib/schedule-engine";
 import {
   Acolyte,
   CustomMass,
@@ -160,6 +164,108 @@ describe("custom masses", () => {
     expect(violations.some((v) => v.message.startsWith("Faltando 1"))).toBe(
       true,
     );
+  });
+});
+
+describe("addCustomMassesToSchedule", () => {
+  const fridayMass: CustomMass = {
+    id: "sex-15h",
+    dayOfWeek: 5,
+    time: "15h",
+    location: "Salão Paroquial",
+    requiredAcolytes: 1,
+  };
+
+  function baseSchedule() {
+    return generateSchedule(2026, 11, acolytes, [], false, {
+      customMasses: [],
+    });
+  }
+
+  it("adds the missing custom masses without touching existing entries", () => {
+    const base = baseSchedule();
+    const before = JSON.stringify(base);
+
+    const { data, added } = addCustomMassesToSchedule(
+      base,
+      2026,
+      11,
+      acolytes,
+      [],
+      false,
+      { customMasses: [fridayMass] },
+    );
+
+    // Novembro/2026 tem sextas nos dias 6, 13, 20 e 27
+    expect(added.map((e) => e.date)).toEqual([
+      "2026-11-06",
+      "2026-11-13",
+      "2026-11-20",
+      "2026-11-27",
+    ]);
+    expect(JSON.stringify(base)).toBe(before);
+
+    const original = base.sections.flatMap((s) => s.entries);
+    const result = data.sections.flatMap((s) => s.entries);
+    for (const entry of original) {
+      expect(result).toContainEqual(entry);
+    }
+    expect(result.length).toBe(original.length + 4);
+    const weekday = data.sections.find((s) => s.title === "Dias de Semana")!;
+    expect(weekday.entries.filter((e) => e.time === "15h").length).toBe(4);
+  });
+
+  it("does not duplicate masses already in the schedule", () => {
+    const first = addCustomMassesToSchedule(
+      baseSchedule(),
+      2026,
+      11,
+      acolytes,
+      [],
+      false,
+      { customMasses: [fridayMass] },
+    );
+    const second = addCustomMassesToSchedule(
+      first.data,
+      2026,
+      11,
+      acolytes,
+      [],
+      false,
+      { customMasses: [fridayMass] },
+    );
+    expect(second.added).toEqual([]);
+  });
+
+  it("respects existing assignments for same and consecutive days", () => {
+    for (let i = 0; i < 20; i++) {
+      const base = baseSchedule();
+      const { added } = addCustomMassesToSchedule(
+        base,
+        2026,
+        11,
+        acolytes,
+        [],
+        false,
+        { customMasses: [fridayMass] },
+      );
+      const existing = base.sections.flatMap((s) => s.entries);
+
+      for (const entry of added) {
+        const d = new Date(entry.date + "T12:00:00");
+        const near = [-1, 0, 1].map((delta) => {
+          const x = new Date(d);
+          x.setDate(x.getDate() + delta);
+          return x.toISOString().split("T")[0];
+        });
+        for (const id of entry.acolytes) {
+          const conflict = existing.some(
+            (e) => near.includes(e.date) && e.acolytes.includes(id),
+          );
+          expect(conflict, `acólito ${id} em ${entry.date}`).toBe(false);
+        }
+      }
+    }
   });
 });
 

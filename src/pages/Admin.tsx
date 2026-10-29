@@ -6,7 +6,11 @@ import ScheduleView from "@/components/ScheduleView";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { generateSchedule, validateSchedule } from "@/lib/schedule-engine";
+import {
+  addCustomMassesToSchedule,
+  generateSchedule,
+  validateSchedule,
+} from "@/lib/schedule-engine";
 import {
   Acolyte,
   DEFAULT_SCHEDULE_SETTINGS,
@@ -19,6 +23,7 @@ import {
 import {
   AlertCircle,
   AlertTriangle,
+  CalendarPlus,
   CheckCircle,
   ChevronLeft,
   ChevronRight,
@@ -303,6 +308,79 @@ export default function Admin() {
     }
   };
 
+  // Completa a escala atual com as missas extras que ainda não estão nela,
+  // sem regenerar o restante
+  const handleAddCustomMasses = async () => {
+    if (!scheduleId || !scheduleData) return;
+
+    if (scheduleSettings.customMasses.length === 0) {
+      Swal.fire({
+        icon: "info",
+        title: "Nenhuma missa extra",
+        text: 'Cadastre as missas na aba Configurações > "Missas Extras".',
+      });
+      return;
+    }
+
+    // Como só as missas novas são sorteadas, algumas tentativas bastam
+    let best: ReturnType<typeof addCustomMassesToSchedule> | null = null;
+    let bestViolationsCount = Infinity;
+    for (let i = 0; i < 30; i++) {
+      const result = addCustomMassesToSchedule(
+        scheduleData,
+        year,
+        month,
+        acolytes,
+        variableRules,
+        isVacation,
+        scheduleSettings,
+      );
+      const count = validateSchedule(
+        result.data,
+        acolytes,
+        variableRules,
+        isVacation,
+        scheduleSettings,
+      ).length;
+      if (count < bestViolationsCount) {
+        bestViolationsCount = count;
+        best = result;
+      }
+    }
+
+    if (!best || best.added.length === 0) {
+      Swal.fire({
+        icon: "info",
+        title: "Nada a adicionar",
+        text: "A escala já tem todas as missas extras cadastradas.",
+      });
+      return;
+    }
+
+    const confirm = await Swal.fire({
+      title: "Adicionar missas extras?",
+      text: `${best.added.length} missa(s) extra(s) serão incluídas na escala de ${MONTH_NAMES[month - 1]}. O restante da escala não será alterado.`,
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Sim, adicionar",
+      cancelButtonText: "Cancelar",
+    });
+    if (!confirm.isConfirmed) return;
+
+    const { error } = await supabase
+      .from("schedules")
+      .update({ data: best.data as any })
+      .eq("id", scheduleId);
+
+    if (error) {
+      toast.error("Erro ao salvar a escala");
+      return;
+    }
+
+    setScheduleData(best.data);
+    toast.success(`${best.added.length} missa(s) extra(s) adicionada(s)`);
+  };
+
   const handleSave = async () => {
     if (!scheduleId || !scheduleData) return;
     await supabase
@@ -540,6 +618,15 @@ export default function Admin() {
                 </Button>
                 {scheduleData && (
                   <>
+                    <Button
+                      onClick={handleAddCustomMasses}
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 sm:flex-none"
+                      title="Inclui as missas extras que faltam, sem regenerar a escala"
+                    >
+                      <CalendarPlus className="h-4 w-4 mr-1" /> Missas Extras
+                    </Button>
                     <Button
                       onClick={handleSave}
                       variant="outline"
