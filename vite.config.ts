@@ -3,8 +3,8 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
-  base: "/",
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "/acolitos-paroquia-santo-antonio/" : "/",
   server: {
     host: "::",
     port: 8080,
