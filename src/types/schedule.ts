@@ -59,6 +59,16 @@ export interface IndividualRestriction {
   blockedLocationIncludes?: string[];
 }
 
+// Missa extra semanal cadastrada pela tela de configurações
+export interface CustomMass {
+  id: string;
+  dayOfWeek: number; // 0=Dom, 6=Sáb
+  time: string;
+  location: string;
+  requiredAcolytes: number;
+  preferenceName?: string;
+}
+
 export interface ScheduleSettings {
   weekendOnlyNames: string[];
   weakAcolytes: string[];
@@ -69,6 +79,7 @@ export interface ScheduleSettings {
   targetChapelAcolyteName: string;
   targetChapelLocationIncludes: string[];
   santaTerezaPreferenceName: string;
+  customMasses: CustomMass[];
   avoidConsecutiveDays?: boolean;
 }
 
@@ -116,6 +127,16 @@ export const DEFAULT_SCHEDULE_SETTINGS: ScheduleSettings = {
   targetChapelAcolyteName: "Maria Anália",
   targetChapelLocationIncludes: ["Agissê", "Sebastião"],
   santaTerezaPreferenceName: "Giovana",
+  customMasses: [
+    {
+      id: "sexta-15h-salao",
+      dayOfWeek: 5,
+      time: "15h",
+      location: "Salão Paroquial",
+      requiredAcolytes: 1,
+      preferenceName: "Allana",
+    },
+  ],
   avoidConsecutiveDays: true,
 };
 

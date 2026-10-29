@@ -1,9 +1,16 @@
 import { useState, useMemo } from "react";
 import {
   Acolyte,
+  CustomMass,
   DEFAULT_SCHEDULE_SETTINGS,
   IndividualRestriction,
+  MassSlot,
+  SATURDAY_BIWEEKLY_MASS,
+  SATURDAY_HOSPITAL_MASS,
+  SATURDAY_MASSES,
   ScheduleSettings,
+  SUNDAY_MASSES,
+  WEEKDAY_MASSES,
 } from "@/types/schedule";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,6 +79,18 @@ const COMMON_LOCATIONS = [
   "Hospital",
 ];
 
+// Missas fixas do código, usadas para evitar cadastrar uma missa extra repetida
+const FIXED_MASSES: { dayOfWeek: number; slot: MassSlot }[] = [
+  ...SUNDAY_MASSES.map((slot) => ({ dayOfWeek: 0, slot })),
+  ...[...SATURDAY_MASSES, SATURDAY_BIWEEKLY_MASS, SATURDAY_HOSPITAL_MASS].map(
+    (slot) => ({ dayOfWeek: 6, slot }),
+  ),
+  ...WEEKDAY_MASSES.map(({ dayOfWeek, slot }) => ({ dayOfWeek, slot })),
+];
+
+// Nomes completos dos locais já usados nas missas fixas (sugestões do campo Local)
+const MASS_LOCATIONS = [...new Set(FIXED_MASSES.map((m) => m.slot.location))];
+
 // Helpers de normalização e validação de horário
 function normalizeTimeToken(raw: string): string {
   const value = raw.trim().toLowerCase();
@@ -108,6 +127,7 @@ function mergeWithDefaults(settings: ScheduleSettings): ScheduleSettings {
     couples: settings.couples || [],
     individualRestrictions: settings.individualRestrictions || [],
     targetChapelLocationIncludes: settings.targetChapelLocationIncludes || [],
+    customMasses: settings.customMasses || [],
     avoidConsecutiveDays:
       settings.avoidConsecutiveDays ??
       DEFAULT_SCHEDULE_SETTINGS.avoidConsecutiveDays ??
@@ -124,7 +144,7 @@ export default function ScheduleSettingsManager({
     mergeWithDefaults(settings),
   );
   const [activeTab, setActiveTab] = useState<
-    "groups" | "couples" | "chapels" | "individual"
+    "groups" | "couples" | "chapels" | "masses" | "individual"
   >("groups");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -132,6 +152,13 @@ export default function ScheduleSettingsManager({
   // Estados para o formulário de novo casal
   const [coupleFirst, setCoupleFirst] = useState("");
   const [coupleSecond, setCoupleSecond] = useState("");
+
+  // Estados para o formulário de nova missa extra
+  const [massDay, setMassDay] = useState("");
+  const [massTime, setMassTime] = useState("");
+  const [massLocation, setMassLocation] = useState("");
+  const [massRequired, setMassRequired] = useState(1);
+  const [massPreference, setMassPreference] = useState("");
 
   // Estado para busca de restrições individuais
   const [searchRestriction, setSearchRestriction] = useState("");
@@ -204,6 +231,68 @@ export default function ScheduleSettingsManager({
     update(
       "couples",
       draft.couples.filter((_, i) => i !== index),
+    );
+  };
+
+  // Funções de Missas Extras
+  const handleAddCustomMass = () => {
+    const location = massLocation.trim();
+    if (massDay === "" || !massTime.trim() || !location) return;
+
+    const time = normalizeTimeToken(massTime);
+    if (!isValidTimeToken(time)) {
+      Swal.fire({
+        icon: "warning",
+        title: "Horário inválido",
+        text: `"${massTime}" não é um horário válido. Use o formato 15h, 7h30 ou 15:00.`,
+      });
+      return;
+    }
+
+    const dayOfWeek = Number(massDay);
+    const sameMass = (m: { dayOfWeek: number; location: string; time: string }) =>
+      m.dayOfWeek === dayOfWeek &&
+      m.time === time &&
+      m.location.toLowerCase() === location.toLowerCase();
+
+    const isFixed = FIXED_MASSES.some((m) =>
+      sameMass({ dayOfWeek: m.dayOfWeek, ...m.slot }),
+    );
+    if (isFixed || draft.customMasses.some(sameMass)) {
+      Swal.fire({
+        icon: "info",
+        title: "Missa já cadastrada",
+        text: `Já existe uma missa de ${DAYS_OF_WEEK[dayOfWeek].fullLabel} às ${time} em ${location}.`,
+      });
+      return;
+    }
+
+    const newMass: CustomMass = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      dayOfWeek,
+      time,
+      location,
+      requiredAcolytes: massRequired,
+      ...(massPreference ? { preferenceName: massPreference } : {}),
+    };
+
+    update(
+      "customMasses",
+      [...draft.customMasses, newMass].sort(
+        (a, b) => a.dayOfWeek - b.dayOfWeek || a.time.localeCompare(b.time),
+      ),
+    );
+    setMassDay("");
+    setMassTime("");
+    setMassLocation("");
+    setMassRequired(1);
+    setMassPreference("");
+  };
+
+  const handleRemoveCustomMass = (id: string) => {
+    update(
+      "customMasses",
+      draft.customMasses.filter((m) => m.id !== id),
     );
   };
 
@@ -407,6 +496,13 @@ export default function ScheduleSettingsManager({
           onClick={() => setActiveTab("chapels")}
           icon={<Church className="h-4 w-4" />}
           label="Capelas & Preferências"
+        />
+        <TabButton
+          active={activeTab === "masses"}
+          onClick={() => setActiveTab("masses")}
+          icon={<Clock className="h-4 w-4" />}
+          label="Missas Extras"
+          badge={draft.customMasses.length}
         />
         <TabButton
           active={activeTab === "individual"}
@@ -734,7 +830,191 @@ export default function ScheduleSettingsManager({
         </div>
       )}
 
-      {/* ABA 4: RESTRIÇÕES INDIVIDUAIS */}
+      {/* ABA 4: MISSAS EXTRAS */}
+      {activeTab === "masses" && (
+        <div className="space-y-6">
+          {/* Card para Adicionar Nova Missa */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-indigo-500" />
+                <div>
+                  <CardTitle className="text-base">Adicionar Missa Extra</CardTitle>
+                  <CardDescription className="text-xs">
+                    A missa entra na escala toda semana, no dia e horário escolhidos. As missas fixas (domingo, sábado, terça e quarta) continuam iguais.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Dia da Semana
+                  </label>
+                  <select
+                    value={massDay}
+                    onChange={(e) => setMassDay(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="">Selecione...</option>
+                    {DAYS_OF_WEEK.map((d) => (
+                      <option key={d.value} value={d.value}>
+                        {d.fullLabel}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Horário
+                  </label>
+                  <Input
+                    value={massTime}
+                    onChange={(e) => setMassTime(e.target.value)}
+                    placeholder="Ex: 12h, 7h30"
+                    list="custom-mass-times"
+                    className="text-sm h-9"
+                  />
+                  <datalist id="custom-mass-times">
+                    {COMMON_TIMES.map((t) => (
+                      <option key={t} value={t} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Local
+                  </label>
+                  <Input
+                    value={massLocation}
+                    onChange={(e) => setMassLocation(e.target.value)}
+                    placeholder="Ex: Salão Paroquial"
+                    list="custom-mass-locations"
+                    className="text-sm h-9"
+                  />
+                  <datalist id="custom-mass-locations">
+                    {MASS_LOCATIONS.map((l) => (
+                      <option key={l} value={l} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Nº de Acólitos
+                  </label>
+                  <select
+                    value={massRequired}
+                    onChange={(e) => setMassRequired(Number(e.target.value))}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {[1, 2, 3, 4].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Preferência (opcional)
+                  </label>
+                  <select
+                    value={massPreference}
+                    onChange={(e) => setMassPreference(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="">Nenhuma</option>
+                    {activeAcolytes.map((a) => (
+                      <option key={a.id} value={a.name}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end mt-4">
+                <Button
+                  type="button"
+                  onClick={handleAddCustomMass}
+                  disabled={massDay === "" || !massTime.trim() || !massLocation.trim()}
+                  className="w-full sm:w-auto"
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Adicionar Missa
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Lista de Missas Extras */}
+          <div className="space-y-3">
+            <h3 className="font-heading font-medium text-sm text-foreground">
+              Missas Extras Cadastradas ({draft.customMasses.length})
+            </h3>
+
+            {draft.customMasses.length === 0 ? (
+              <div className="text-center py-10 border border-dashed border-border rounded-xl bg-card/50">
+                <Clock className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+                <p className="text-sm font-medium text-muted-foreground">
+                  Nenhuma missa extra cadastrada.
+                </p>
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  Utilize o formulário acima para incluir uma missa semanal na escala.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {draft.customMasses.map((mass) => (
+                  <div
+                    key={mass.id}
+                    className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-card shadow-sm hover:border-accent/40 transition-colors"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-medium text-sm text-foreground">
+                          {DAYS_OF_WEEK[mass.dayOfWeek]?.fullLabel} • {mass.time}
+                        </span>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {mass.requiredAcolytes} acólito{mass.requiredAcolytes > 1 ? "s" : ""}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <MapPin className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{mass.location}</span>
+                      </div>
+                      {mass.preferenceName && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <UserCheck className="h-3 w-3 shrink-0" />
+                          <span className="truncate">Preferência: {mass.preferenceName}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleRemoveCustomMass(mass.id)}
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 ml-2"
+                      title="Remover missa"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ABA 5: RESTRIÇÕES INDIVIDUAIS */}
       {activeTab === "individual" && (
         <div className="space-y-6">
           {/* Barra de Ações & Adição de Regra */}

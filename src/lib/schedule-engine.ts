@@ -67,6 +67,8 @@ function mergeSettings(settings?: Partial<ScheduleSettings>): ScheduleSettings {
     targetChapelLocationIncludes:
       settings?.targetChapelLocationIncludes ??
       DEFAULT_SCHEDULE_SETTINGS.targetChapelLocationIncludes,
+    customMasses:
+      settings?.customMasses ?? DEFAULT_SCHEDULE_SETTINGS.customMasses,
     avoidConsecutiveDays:
       settings?.avoidConsecutiveDays ??
       DEFAULT_SCHEDULE_SETTINGS.avoidConsecutiveDays ??
@@ -495,6 +497,26 @@ export function generateSchedule(
         });
       }
     }
+
+    // 4. Missas extras (cadastradas nas configurações, toda semana)
+    for (const mass of settings.customMasses.filter(
+      (m) => m.dayOfWeek === dow,
+    )) {
+      const entry = {
+        date: dateStr,
+        dayOfWeek: dow,
+        location: mass.location,
+        time: mass.time,
+      };
+      const ids = pickAcolytes(
+        entry,
+        mass.requiredAcolytes,
+        mass.preferenceName || undefined,
+      );
+      const target =
+        dow === 0 ? sundayEntries : dow === 6 ? saturdayEntries : weekdayEntries;
+      target.push({ ...entry, acolytes: ids });
+    }
   }
 
   sections.push({ title: "Domingos", entries: sundayEntries });
@@ -506,11 +528,14 @@ export function generateSchedule(
 
 // ========== VALIDATION ==========
 
-function getRequiredAcolytes(entry: ScheduleEntry): number | undefined {
+function getRequiredAcolytes(
+  entry: ScheduleEntry,
+  settings: ScheduleSettings,
+): number | undefined {
   const matches = (slot: MassSlot) =>
     slot.location === entry.location && slot.time === entry.time;
 
-  const candidates: MassSlot[] =
+  const fixed: MassSlot[] =
     entry.dayOfWeek === 0
       ? SUNDAY_MASSES
       : entry.dayOfWeek === 6
@@ -518,8 +543,11 @@ function getRequiredAcolytes(entry: ScheduleEntry): number | undefined {
         : WEEKDAY_MASSES.filter((m) => m.dayOfWeek === entry.dayOfWeek).map(
             (m) => m.slot,
           );
+  const custom = settings.customMasses.filter(
+    (m) => m.dayOfWeek === entry.dayOfWeek,
+  );
 
-  return candidates.find(matches)?.requiredAcolytes;
+  return [...fixed, ...custom].find(matches)?.requiredAcolytes;
 }
 
 export function validateSchedule(
@@ -632,7 +660,7 @@ export function validateSchedule(
       }
 
       // Check missing acolytes
-      const required = getRequiredAcolytes(entry);
+      const required = getRequiredAcolytes(entry, settings);
       if (required !== undefined && entry.acolytes.length < required) {
         const missing = required - entry.acolytes.length;
         violations.push({
